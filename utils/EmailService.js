@@ -1,4 +1,4 @@
-import { TransactionalEmailsApi, SendSmtpEmail, BrevoClient } from '@getbrevo/brevo'
+import { BrevoClient } from '@getbrevo/brevo'
 import fs from 'fs/promises'
 import path from 'path'
 import { fileURLToPath } from 'url'
@@ -14,8 +14,9 @@ if (!process.env.BREVO_SENDER) {
     console.error('[Email] BREVO_SENDER is not set')
 }
 
-const client = new TransactionalEmailsApi()
-client.authentications['api-key'].apiKey = process.env.BREVO_API_KEY
+const client = new BrevoClient({
+    apiKey: process.env.BREVO_API_KEY
+})
 
 const SENDER_NAME = process.env.SMTP_FROM || 'Lunarcord'
 const SENDER_EMAIL = process.env.BREVO_SENDER
@@ -33,14 +34,13 @@ async function getTemplate(templateName) {
 
 async function sendMail({ to, subject, html, text }) {
     try {
-        const email = new SendSmtpEmail()
-        email.sender = { name: SENDER_NAME, email: SENDER_EMAIL }
-        email.to = [{ email: to }]
-        email.subject = subject
-        email.htmlContent = html
-        email.textContent = text
-
-        await client.sendTransacEmail(email)
+        await client.transactionalEmails.sendTransacEmail({
+            sender: { name: SENDER_NAME, email: SENDER_EMAIL },
+            to: [{ email: to }],
+            subject,
+            htmlContent: html,
+            textContent: text
+        })
         console.log(`[Email] Sent "${subject}" to ${to}`)
     } catch (error) {
         console.error('[Email] Failed to send to', to, ':', error.message)
