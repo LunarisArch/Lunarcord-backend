@@ -15,7 +15,7 @@ const require = createRequire(import.meta.url)
 const { version } = require('./package.json')
 
 const app = express()
-const port = 3000
+const PORT = process.env.PORT || 3000;
 
 dotenv.config()
 
@@ -34,9 +34,9 @@ app.get('/', async (req, res) => {
     res.status(200).json({ status: 'online!', version: version })
 })
 
-app.listen(port, () => {
-    console.log('Server is runnning! http://localhost:3000')
-})
+app.listen(PORT, () => {
+    console.log(`Server is running on port ${PORT}`);
+});
 
 
 
