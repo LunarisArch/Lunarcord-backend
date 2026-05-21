@@ -19,6 +19,7 @@ const app = express()
 const PORT = process.env.PORT || 3000;
 
 app.use(cors({ origin: ['http://192.168.66.142:5173', 'https://lunarcord.vercel.app', '192.168.66.142'], credentials: true }))
+app.set('trust proxy', 1);
 app.use(express.json())
 app.use(cookieParser())
 app.use(globalLimiter)
