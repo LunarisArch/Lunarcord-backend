@@ -24,7 +24,7 @@ const CLIENT_URL = process.env.CLIENT_URL || 'http://localhost:5173'
 
 async function getTemplate(templateName) {
     try {
-        const filePath = path.join(__dirname, '../email-templates', `${templateName}.html`)
+        const filePath = path.join(__dirname, 'email-templates', `${templateName}.html`)
         return await fs.readFile(filePath, 'utf-8')
     } catch (error) {
         console.error(`[Email] Template "${templateName}" not found:`, error.message)
