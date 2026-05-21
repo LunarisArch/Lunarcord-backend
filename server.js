@@ -34,7 +34,9 @@ app.get('/', async (req, res) => {
     res.status(200).json({ status: 'online!', version: version })
 })
 
-
+app.listen(PORT, () => {
+    console.log(`Server is running on port ${PORT}`);
+});
 
 
 
