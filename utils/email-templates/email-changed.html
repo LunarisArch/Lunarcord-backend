@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Email address changed</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { background-color: #080010; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; padding: 40px 16px; }
+    .wrapper { max-width: 520px; margin: 0 auto; }
+    .card { background: #0f0020; border: 1px solid #4400aa; border-radius: 16px; overflow: hidden; }
+    .header { background: #160030; padding: 32px; text-align: center; border-bottom: 1px solid #220055; }
+    .logo { font-size: 28px; font-weight: 700; color: #f5e6ff; letter-spacing: -0.5px; }
+    .logo span { color: #bf00ff; }
+    .body { padding: 36px 32px; }
+    .icon { width: 56px; height: 56px; background: #1e0040; border: 1px solid #4400aa; border-radius: 50%; margin: 0 auto 20px; display: flex; align-items: center; justify-content: center; }
+    h1 { color: #f5e6ff; font-size: 22px; font-weight: 600; text-align: center; margin-bottom: 12px; }
+    p { color: #7755aa; font-size: 14px; line-height: 1.7; text-align: center; margin-bottom: 20px; }
+    .warning { background: #1a0010; border: 1px solid #660020; border-radius: 8px; padding: 14px 16px; margin-bottom: 24px; }
+    .warning p { color: #ff6688; font-size: 13px; margin: 0; text-align: left; }
+    .note { color: #4a3070; font-size: 12px; text-align: center; line-height: 1.6; }
+    .note a { color: #7755aa; }
+    .footer { padding: 20px 32px; text-align: center; border-top: 1px solid #220055; }
+    .footer p { color: #2a0055; font-size: 12px; }
+    .footer a { color: #4400aa; text-decoration: none; }
+  </style>
+</head>
+<body>
+  <div class="wrapper">
+    <div class="card">
+      <div class="header">
+        <div class="logo">Lunar<span>cord</span></div>
+      </div>
+      <div class="body">
+        <div class="icon">
+          <svg width="24" height="24" fill="none" viewBox="0 0 24 24">
+            <path d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" stroke="#bf00ff" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </div>
+        <h1>Email address changed</h1>
+        <p>This is a notification that the email address on your Lunarcord account was recently updated. This message was sent to your previous address as a security measure.</p>
+        <div class="warning">
+          <p>⚠️ If you did not make this change, your account may be compromised. <a href="{{APP_URL}}/forgot-password" style="color:#ff2d55">Reset your password immediately</a> and contact support — do not delay.</p>
+        </div>
+        <p class="note">If this was you, no action is needed. Future emails will be sent to your new address.</p>
+      </div>
+      <div class="footer">
+        <p>© 2026 Lunarcord &nbsp;·&nbsp; <a href="{{APP_URL}}">Visit site</a></p>
+      </div>
+    </div>
+  </div>
+</body>
+</html>
