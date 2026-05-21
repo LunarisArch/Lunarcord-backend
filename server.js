@@ -24,14 +24,15 @@ app.use(cookieParser())
 app.use(globalLimiter)
 app.use(requestLogger)
 app.use('/auth', authLimiter, authRouter)
-app.use(notFound)
-app.use(errorHandler)
 
 app.get('/health', async (req, res) => { res.send('Ok') })
 
 app.get('/', async (req, res) => {
     res.status(200).json({ status: 'online!', version: version })
 })
+
+app.use(errorHandler)
+app.use(notFound)
 
 app.listen(PORT, () => {
     console.log(`Server is running on port ${PORT}`);
