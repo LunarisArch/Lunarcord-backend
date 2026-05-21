@@ -19,7 +19,7 @@ const PORT = process.env.PORT || 3000;
 
 dotenv.config()
 
-app.use(cors({ origin: ['http://192.168.66.142:5173', 'https://lunarcord.vercel.app'], credentials: true }))
+app.use(cors({ origin: ['http://192.168.66.142:5173', 'https://lunarcord.vercel.app', '192.168.66.142'], credentials: true }))
 app.use(express.json())
 app.use(cookieParser())
 app.use(globalLimiter)
