@@ -7,18 +7,16 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const transporter = nodemailer.createTransport({
-    host: '142.250.150.109', // Direct IPv4 for smtp.gmail.com
-    port: parseInt(process.env.SMTP_PORT || '567', 10),
+    host: process.env.SMTP_HOST || 'smtp.gmail.com',
+    port: parseInt(process.env.SMTP_PORT || '587', 10),
     secure: process.env.SMTP_SECURE === 'true',
-    family: 4,
     auth: {
         user: process.env.SMTP_USER,
         pass: process.env.SMTP_PASS,
     },
     tls: {
         // Keeps local network configurations from dropping the secure handshake
-        rejectUnauthorized: false,
-        servername: 'smtp.gmail.com' // REQUIRED: tells Gmail we are trying to connect to them
+        rejectUnauthorized: false
     }
 });
 
