@@ -12,6 +12,7 @@
   "license": "MIT",
   "type": "module",
   "dependencies": {
+    "@getbrevo/brevo": "^5.0.4",
     "@supabase/supabase-js": "^2.105.4",
     "bcrypt": "^6.0.0",
     "cookie-parser": "^1.4.7",
@@ -20,7 +21,6 @@
     "express": "^5.2.1",
     "express-rate-limit": "^8.5.2",
     "jsonwebtoken": "^9.0.3",
-    "nodemailer": "^8.0.7",
     "nodemon": "^3.1.14",
     "npm": "^11.14.1"
   }
