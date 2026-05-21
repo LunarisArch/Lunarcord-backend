@@ -1,4 +1,4 @@
-import { TransactionalEmailsApi, SendSmtpEmail, ApiClient } from '@getbrevo/brevo'
+import { TransactionalEmailsApi, SendSmtpEmail, BrevoClient } from '@getbrevo/brevo'
 import fs from 'fs/promises'
 import path from 'path'
 import { fileURLToPath } from 'url'
