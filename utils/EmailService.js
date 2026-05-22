@@ -1,111 +1,71 @@
-import fs from 'fs/promises'
-import path from 'path'
-import { fileURLToPath } from 'url'
-
-const __filename = fileURLToPath(import.meta.url)
-const __dirname = path.dirname(__filename)
-
-if (!process.env.BREVO_API_KEY) {
-    console.error('[Email] BREVO_API_KEY is not set')
-}
-
-if (!process.env.BREVO_SENDER) {
-    console.error('[Email] BREVO_SENDER is not set')
-}
-
-const SENDER_NAME = process.env.SMTP_FROM || 'Lunarcord'
-const SENDER_EMAIL = process.env.BREVO_SENDER
-const CLIENT_URL = process.env.CLIENT_URL || 'http://localhost:5173'
-
-async function getTemplate(templateName) {
+// GET /auth/verify-email
+router.get('/verify-email', async (req, res) => {
     try {
-        const filePath = path.join(__dirname, 'email-templates', `${templateName}.html`)
-        return await fs.readFile(filePath, 'utf-8')
-    } catch (error) {
-        console.error(`[Email] Template "${templateName}" not found:`, error.message)
-        throw new Error(`Email template "${templateName}" could not be loaded`)
-    }
-}
+        const { token } = req.query
 
-async function sendMail({ to, subject, html, text }) {
-    try {
-        const response = await fetch('https://api.brevo.com/v3/smtp/email', {
-            method: 'POST',
-            headers: {
-                'accept': 'application/json',
-                'api-key': process.env.BREVO_API_KEY,
-                'content-type': 'application/json'
-            },
-            body: JSON.stringify({
-                sender: { name: SENDER_NAME, email: SENDER_EMAIL },
-                to: [{ email: to }],
-                subject,
-                htmlContent: html,
-                textContent: text
-            })
-        })
-
-        if (!response.ok) {
-            const err = await response.json()
-            console.error('[Email] Brevo API error:', err)
-            throw new Error(err.message || 'Brevo API request failed')
+        if (!token) {
+            return res.status(400).json({ error: 'Token is required' })
         }
 
-        console.log(`[Email] Sent "${subject}" to ${to}`)
+        // Get all unused verify_email tokens — no expires_at filter so we can give better errors
+        const { data: tokens, error: fetchError } = await supabase
+            .from('email_tokens')
+            .select('id, user_id, token_hash, expires_at, used')
+            .eq('type', 'verify_email')
+            .eq('used', false)
+
+        if (fetchError) {
+            console.error('[Verify] DB fetch error:', fetchError.message)
+            return res.status(500).json({ error: 'Internal server error' })
+        }
+
+        if (!tokens || tokens.length === 0) {
+            return res.status(400).json({ error: 'Invalid or expired verification link' })
+        }
+
+        // Find matching token
+        let matchedToken = null
+        for (const t of tokens) {
+            const isMatch = await CryptoUtility.compareToken(token, t.token_hash)
+            if (isMatch) { matchedToken = t; break }
+        }
+
+        if (!matchedToken) {
+            return res.status(400).json({ error: 'Invalid or expired verification link' })
+        }
+
+        // Check expiry manually after finding the match
+        if (new Date(matchedToken.expires_at) < new Date()) {
+            return res.status(400).json({ error: 'Verification link has expired. Please request a new one.' })
+        }
+
+        // Mark token as used
+        const { error: tokenUpdateError } = await supabase
+            .from('email_tokens')
+            .update({ used: true })
+            .eq('id', matchedToken.id)
+
+        if (tokenUpdateError) {
+            console.error('[Verify] Failed to mark token used:', tokenUpdateError.message)
+            return res.status(500).json({ error: 'Internal server error' })
+        }
+
+        // Verify the user
+        const { error: userUpdateError } = await supabase
+            .from('users')
+            .update({ is_verified: true })
+            .eq('id', matchedToken.user_id)
+
+        if (userUpdateError) {
+            console.error('[Verify] Failed to verify user:', userUpdateError.message)
+            return res.status(500).json({ error: 'Internal server error' })
+        }
+
+        console.log('[Verify] User verified successfully:', matchedToken.user_id)
+        return res.status(200).json({ message: 'Email verified successfully' })
+
     } catch (error) {
-        console.error('[Email] Failed to send to', to, ':', error.message)
-        throw new Error('Failed to send email')
+        console.error('[Auth] Verify email error:', error.message)
+        return res.status(500).json({ error: 'Internal server error' })
     }
-}
-
-export async function sendVerificationEmail(to, token) {
-    const verifyUrl = `${CLIENT_URL}/verify-email?token=${token}`
-    let html = await getTemplate('verify')
-    html = html.replace(/{{VERIFY_URL}}/g, verifyUrl)
-    html = html.replace(/{{APP_URL}}/g, CLIENT_URL)
-
-    await sendMail({
-        to,
-        subject: 'Lunarcord — Verify your email address',
-        html,
-        text: `Verify your Lunarcord email by visiting: ${verifyUrl}\n\nThis link expires in 24 hours.\n\nIf you didn't create an account, ignore this email.`
-    })
-}
-
-export async function sendPasswordResetEmail(to, token) {
-    const resetUrl = `${CLIENT_URL}/reset-password?token=${token}`
-    let html = await getTemplate('reset-password')
-    html = html.replace(/{{RESET_URL}}/g, resetUrl)
-    html = html.replace(/{{APP_URL}}/g, CLIENT_URL)
-
-    await sendMail({
-        to,
-        subject: 'Lunarcord — Password Reset Request',
-        html,
-        text: `Reset your Lunarcord password by visiting: ${resetUrl}\n\nThis link expires in 1 hour.\n\nIf you didn't request this, ignore this email.`
-    })
-}
-
-export async function sendPasswordChangedEmail(to) {
-    let html = await getTemplate('password-changed')
-    html = html.replace(/{{APP_URL}}/g, CLIENT_URL)
-
-    await sendMail({
-        to,
-        subject: 'Lunarcord — Security Alert: Your password has been updated',
-        html,
-        text: `Your Lunarcord password was recently changed. If this was you, no action is needed.\n\nIf you did not change your password, contact support immediately at ${CLIENT_URL}.`
-    })
-}
-
-export async function sendEmailChangedEmail(to) {
-    let html = await getTemplate('email-changed')
-    html = html.replace(/{{APP_URL}}/g, CLIENT_URL)
-
-    await sendMail({
-        to,
-        subject: 'Lunarcord — Security Alert: Account email address changed',
-        html,
-        text: `The email address on your Lunarcord account was recently changed. If this was you, no action is needed.\n\nIf you did not make this change, contact support immediately at ${CLIENT_URL}.`
-    })
-}
+})
