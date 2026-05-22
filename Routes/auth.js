@@ -287,10 +287,12 @@ router.post('/logout', async (req, res) => {
 // ─────────────────────────────────────────────────────────────────────────────
 // GET /auth/verify-email
 // ─────────────────────────────────────────────────────────────────────────────
-// GET /auth/verify-email
 router.get('/verify-email', async (req, res) => {
     try {
-        const { token } = req.query
+        // Decode token in case it was URL encoded
+        const token = decodeURIComponent(req.query.token || '')
+
+        console.log('[Verify] Token received, length:', token.length)
 
         if (!token) {
             return res.status(400).json({ error: 'Token is required' })
@@ -302,6 +304,9 @@ router.get('/verify-email', async (req, res) => {
             .eq('type', 'verify_email')
             .eq('used', false)
 
+        console.log('[Verify] Fetch error:', fetchError)
+        console.log('[Verify] Tokens in DB:', tokens?.length)
+
         if (fetchError || !tokens || tokens.length === 0) {
             return res.status(400).json({ error: 'Invalid or expired verification link' })
         }
@@ -309,8 +314,11 @@ router.get('/verify-email', async (req, res) => {
         let matchedToken = null
         for (const t of tokens) {
             const isMatch = await CryptoUtility.compareToken(token, t.token_hash)
+            console.log('[Verify] Comparing token:', t.id, '| match:', isMatch)
             if (isMatch) { matchedToken = t; break }
         }
+
+        console.log('[Verify] Matched:', matchedToken?.id, '| user:', matchedToken?.user_id)
 
         if (!matchedToken) {
             return res.status(400).json({ error: 'Invalid or expired verification link' })
@@ -320,9 +328,37 @@ router.get('/verify-email', async (req, res) => {
             return res.status(400).json({ error: 'Verification link has expired. Please request a new one.' })
         }
 
-        await supabase.from('email_tokens').update({ used: true }).eq('id', matchedToken.id)
-        await supabase.from('users').update({ is_verified: true }).eq('id', matchedToken.user_id)
+        // Mark token used
+        const { data: updatedToken, error: tokenUpdateError } = await supabase
+            .from('email_tokens')
+            .update({ used: true })
+            .eq('id', matchedToken.id)
+            .select()
 
+        console.log('[Verify] Token update result:', updatedToken)
+        console.log('[Verify] Token update error:', tokenUpdateError)
+
+        if (tokenUpdateError) {
+            console.error('[Verify] Failed to mark token used:', tokenUpdateError.message)
+            return res.status(500).json({ error: 'Internal server error' })
+        }
+
+        // Verify user
+        const { data: updatedUser, error: userUpdateError } = await supabase
+            .from('users')
+            .update({ is_verified: true })
+            .eq('id', matchedToken.user_id)
+            .select()
+
+        console.log('[Verify] User update result:', updatedUser)
+        console.log('[Verify] User update error:', userUpdateError)
+
+        if (userUpdateError) {
+            console.error('[Verify] Failed to verify user:', userUpdateError.message)
+            return res.status(500).json({ error: 'Internal server error' })
+        }
+
+        console.log('[Verify] User verified successfully:', matchedToken.user_id)
         return res.status(200).json({ message: 'Email verified successfully' })
 
     } catch (error) {
