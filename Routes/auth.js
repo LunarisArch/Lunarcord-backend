@@ -302,7 +302,7 @@ router.get('/verify-email', async (req, res) => {
             .eq('type', 'verify_email')
             .eq('used', false)
 
-        if (fetchError || !tokens || tokens.length === 0) {
+        if (fetchError || !tokens) {
             return res.status(400).json({ error: 'Invalid or expired verification link (1)' })
         }
 
