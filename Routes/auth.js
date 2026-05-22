@@ -287,7 +287,6 @@ router.post('/logout', async (req, res) => {
 // ─────────────────────────────────────────────────────────────────────────────
 // GET /auth/verify-email
 // ─────────────────────────────────────────────────────────────────────────────
-// GET /auth/verify-email
 router.get('/verify-email', async (req, res) => {
     try {
         const { token } = req.query
@@ -302,8 +301,8 @@ router.get('/verify-email', async (req, res) => {
             .eq('type', 'verify_email')
             .eq('used', false)
 
-        if (fetchError || !tokens) {
-            return res.status(400).json({ error: 'Invalid or expired verification link (1)' })
+        if (fetchError || !tokens || tokens.length === 0) {
+            return res.status(400).json({ error: 'Invalid or expired verification link' })
         }
 
         let matchedToken = null
@@ -313,12 +312,14 @@ router.get('/verify-email', async (req, res) => {
         }
 
         if (!matchedToken) {
-            return res.status(400).json({ error: 'Invalid or expired verification link (2)' })
+            return res.status(400).json({ error: 'Invalid or expired verification link' })
         }
 
         if (new Date(matchedToken.expires_at) < new Date()) {
             return res.status(400).json({ error: 'Verification link has expired. Please request a new one.' })
         }
+
+        res.set('Cache-Control', 'no-store')
 
         await supabase.from('email_tokens').update({ used: true }).eq('id', matchedToken.id)
         await supabase.from('users').update({ is_verified: true }).eq('id', matchedToken.user_id)
