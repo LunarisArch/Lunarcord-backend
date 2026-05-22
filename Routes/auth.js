@@ -289,48 +289,56 @@ router.post('/logout', async (req, res) => {
 // ─────────────────────────────────────────────────────────────────────────────
 router.get('/verify-email', async (req, res) => {
     try {
-        const { token } = req.query
+        const { token } = req.query;
 
         if (!token) {
-            return res.status(400).json({ error: 'Token is required' })
+            return res.status(400).json({ error: 'Token is required' });
         }
 
+        // FIX 1: Remove .eq('used', false) so we can fetch the token even if it was just used
         const { data: tokens, error: fetchError } = await supabase
             .from('email_tokens')
             .select('id, user_id, token_hash, expires_at, used')
-            .eq('type', 'verify_email')
-            .eq('used', false)
+            .eq('type', 'verify_email');
 
         if (fetchError || !tokens || tokens.length === 0) {
-            return res.status(400).json({ error: 'Invalid or expired verification link' })
+            return res.status(400).json({ error: 'Invalid verification link' });
         }
 
-        let matchedToken = null
+        let matchedToken = null;
         for (const t of tokens) {
-            const isMatch = await CryptoUtility.compareToken(token, t.token_hash)
-            if (isMatch) { matchedToken = t; break }
+            const isMatch = await CryptoUtility.compareToken(token, t.token_hash);
+            if (isMatch) {
+                matchedToken = t;
+                break;
+            }
         }
 
         if (!matchedToken) {
-            return res.status(400).json({ error: 'Invalid or expired verification link' })
+            return res.status(400).json({ error: 'Invalid verification link' });
+        }
+
+        // FIX 2: Intercept the React double-fire. If it's already used, it's a success!
+        if (matchedToken.used) {
+            return res.status(200).json({ message: 'Email is already verified' });
         }
 
         if (new Date(matchedToken.expires_at) < new Date()) {
-            return res.status(400).json({ error: 'Verification link has expired. Please request a new one.' })
+            return res.status(400).json({ error: 'Verification link has expired. Please request a new one.' });
         }
 
-        res.set('Cache-Control', 'no-store')
+        res.set('Cache-Control', 'no-store');
 
-        await supabase.from('email_tokens').update({ used: true }).eq('id', matchedToken.id)
-        await supabase.from('users').update({ is_verified: true }).eq('id', matchedToken.user_id)
+        await supabase.from('email_tokens').update({ used: true }).eq('id', matchedToken.id);
+        await supabase.from('users').update({ is_verified: true }).eq('id', matchedToken.user_id);
 
-        return res.status(200).json({ message: 'Email verified successfully' })
+        return res.status(200).json({ message: 'Email verified successfully' });
 
     } catch (error) {
-        console.error('[Auth] Verify email error:', error.message)
-        return res.status(500).json({ error: 'Internal server error' })
+        console.error('[Auth] Verify email error:', error.message);
+        return res.status(500).json({ error: 'Internal server error' });
     }
-})
+});
 
 // ─────────────────────────────────────────────────────────────────────────────
 // POST /auth/resend-verification
