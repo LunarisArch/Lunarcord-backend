@@ -1,4 +1,3 @@
-import { BrevoClient } from '@getbrevo/brevo'
 import fs from 'fs/promises'
 import path from 'path'
 import { fileURLToPath } from 'url'
@@ -13,10 +12,6 @@ if (!process.env.BREVO_API_KEY) {
 if (!process.env.BREVO_SENDER) {
     console.error('[Email] BREVO_SENDER is not set')
 }
-
-const client = new BrevoClient({
-    apiKey: process.env.BREVO_API_KEY
-})
 
 const SENDER_NAME = process.env.SMTP_FROM || 'Lunarcord'
 const SENDER_EMAIL = process.env.BREVO_SENDER
@@ -34,13 +29,28 @@ async function getTemplate(templateName) {
 
 async function sendMail({ to, subject, html, text }) {
     try {
-        await client.transactionalEmails.sendTransacEmail({
-            sender: { name: SENDER_NAME, email: SENDER_EMAIL },
-            to: [{ email: to }],
-            subject,
-            htmlContent: html,
-            textContent: text
+        const response = await fetch('https://api.brevo.com/v3/smtp/email', {
+            method: 'POST',
+            headers: {
+                'accept': 'application/json',
+                'api-key': process.env.BREVO_API_KEY,
+                'content-type': 'application/json'
+            },
+            body: JSON.stringify({
+                sender: { name: SENDER_NAME, email: SENDER_EMAIL },
+                to: [{ email: to }],
+                subject,
+                htmlContent: html,
+                textContent: text
+            })
         })
+
+        if (!response.ok) {
+            const err = await response.json()
+            console.error('[Email] Brevo API error:', err)
+            throw new Error(err.message || 'Brevo API request failed')
+        }
+
         console.log(`[Email] Sent "${subject}" to ${to}`)
     } catch (error) {
         console.error('[Email] Failed to send to', to, ':', error.message)
