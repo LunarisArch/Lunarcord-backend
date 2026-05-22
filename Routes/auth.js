@@ -303,7 +303,7 @@ router.get('/verify-email', async (req, res) => {
             .eq('used', false)
 
         if (fetchError || !tokens || tokens.length === 0) {
-            return res.status(400).json({ error: 'Invalid or expired verification link' })
+            return res.status(400).json({ error: 'Invalid or expired verification link (1)' })
         }
 
         let matchedToken = null
@@ -313,7 +313,7 @@ router.get('/verify-email', async (req, res) => {
         }
 
         if (!matchedToken) {
-            return res.status(400).json({ error: 'Invalid or expired verification link' })
+            return res.status(400).json({ error: 'Invalid or expired verification link (2)' })
         }
 
         if (new Date(matchedToken.expires_at) < new Date()) {
