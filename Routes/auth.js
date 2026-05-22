@@ -342,7 +342,7 @@ router.get('/verify-email', async (req, res) => {
         await supabase.from('email_tokens').update({ used: true }).eq('id', matchedToken.id)
         await supabase.from('users').update({ is_verified: true }).eq('id', matchedToken.user_id)
 
-        return res.redirect(`${process.env.CLIENT_URL}/login?verified=true`)
+        return res.status(200).json({ message: 'Email verified successfully' })
     } catch (error) {
         console.error('[Auth] Verify email error:', error.message)
         return res.status(500).json({ error: 'Internal server error' })
