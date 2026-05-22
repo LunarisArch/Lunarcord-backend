@@ -18,7 +18,7 @@ const { version } = require('./package.json')
 const app = express()
 const PORT = process.env.PORT || 3000;
 
-app.use(cors({ origin: ['*'], credentials: true }))
+app.use(cors({ origin: ['http://192.168.66.142:5173', 'https://lunarcord.vercel.app'], credentials: true }))
 app.use(express.json())
 app.set('trust proxy', 1)
 app.use(cookieParser())
