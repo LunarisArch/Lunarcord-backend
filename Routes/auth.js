@@ -73,23 +73,19 @@ router.post('/register', async (req, res) => {
     try {
         const { email, username, password } = req.body
 
-        // Validate fields present
         if (!email || !username || !password) {
             return res.status(400).json({ error: 'Email, username and password are required' })
         }
 
-        // Validate email format
         const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
         if (!emailRegex.test(email)) {
             return res.status(400).json({ error: 'Invalid email format' })
         }
 
-        // Validate password strength
         if (password.length < 8) {
             return res.status(400).json({ error: 'Password must be at least 8 characters' })
         }
 
-        // Check email not taken
         const { data: existingEmail } = await supabase
             .from('users')
             .select('id')
@@ -100,7 +96,6 @@ router.post('/register', async (req, res) => {
             return res.status(409).json({ error: 'Email already in use' })
         }
 
-        // Check username not taken
         const { data: existingUsername } = await supabase
             .from('users')
             .select('id')
@@ -111,10 +106,8 @@ router.post('/register', async (req, res) => {
             return res.status(409).json({ error: 'Username already taken' })
         }
 
-        // Hash password
         const password_hash = await bcrypt.hash(password, BCRYPT_ROUNDS)
 
-        // Insert user
         const { data: newUser, error: insertError } = await supabase
             .from('users')
             .insert({
@@ -128,12 +121,10 @@ router.post('/register', async (req, res) => {
 
         if (insertError) throw insertError
 
-        // Generate and store verification email token
         const verifyToken = CryptoUtility.generateToken()
         await storeEmailToken(newUser.id, verifyToken, 'verify_email', VERIFY_TOKEN_EXPIRES_HOURS)
         await sendVerificationEmail(newUser.email, verifyToken)
 
-        // Generate and store session tokens
         const accessToken = JwtUtility.generateAccessToken(newUser)
         const refreshToken = JwtUtility.generateRefreshToken()
         await storeRefreshToken(newUser.id, refreshToken)
@@ -165,25 +156,21 @@ router.post('/login', async (req, res) => {
             return res.status(400).json({ error: 'Email and password are required' })
         }
 
-        // Look up user
         const { data: user } = await supabase
             .from('users')
             .select('id, email, username, password_hash, is_verified')
             .eq('email', email.toLowerCase())
             .single()
 
-        // Generic message to prevent email enumeration
         if (!user) {
             return res.status(401).json({ error: 'Invalid credentials' })
         }
 
-        // Compare password
         const passwordMatch = await bcrypt.compare(password, user.password_hash)
         if (!passwordMatch) {
             return res.status(401).json({ error: 'Invalid credentials' })
         }
 
-        // Check verified
         if (!user.is_verified) {
             return res.status(403).json({
                 error: 'Please verify your email before logging in',
@@ -191,7 +178,6 @@ router.post('/login', async (req, res) => {
             })
         }
 
-        // Generate and store tokens
         const accessToken = JwtUtility.generateAccessToken(user)
         const refreshToken = JwtUtility.generateRefreshToken()
         await storeRefreshToken(user.id, refreshToken)
@@ -223,7 +209,6 @@ router.post('/refresh', async (req, res) => {
             return res.status(401).json({ error: 'No refresh token provided' })
         }
 
-        // Get all non-revoked, non-expired tokens for comparison
         const { data: tokens } = await supabase
             .from('refresh_tokens')
             .select('id, user_id, token_hash, expires_at, revoked')
@@ -234,7 +219,6 @@ router.post('/refresh', async (req, res) => {
             return res.status(401).json({ error: 'Invalid refresh token' })
         }
 
-        // Find matching token by comparing hashes
         let matchedToken = null
         for (const token of tokens) {
             const isMatch = await CryptoUtility.compareToken(plainToken, token.token_hash)
@@ -245,7 +229,6 @@ router.post('/refresh', async (req, res) => {
             return res.status(401).json({ error: 'Invalid refresh token' })
         }
 
-        // Get user
         const { data: user } = await supabase
             .from('users')
             .select('id, email, username, is_verified')
@@ -256,14 +239,12 @@ router.post('/refresh', async (req, res) => {
             return res.status(401).json({ error: 'User not found' })
         }
 
-        // Rotate — revoke old, issue new
         await supabase.from('refresh_tokens').update({ revoked: true }).eq('id', matchedToken.id)
         const newRefreshToken = JwtUtility.generateRefreshToken()
         await storeRefreshToken(user.id, newRefreshToken)
         setRefreshCookie(res, newRefreshToken)
 
         const accessToken = JwtUtility.generateAccessToken(user)
-
         return res.status(200).json({ accessToken })
     } catch (error) {
         console.error('[Auth] Refresh error:', error.message)
@@ -279,7 +260,6 @@ router.post('/logout', async (req, res) => {
         const plainToken = req.cookies?.refreshToken
 
         if (plainToken) {
-            // Find and revoke the matching refresh token
             const { data: tokens } = await supabase
                 .from('refresh_tokens')
                 .select('id, token_hash')
@@ -307,63 +287,71 @@ router.post('/logout', async (req, res) => {
 // ─────────────────────────────────────────────────────────────────────────────
 // GET /auth/verify-email
 // ─────────────────────────────────────────────────────────────────────────────
-// GET /auth/verify-email
 router.get('/verify-email', async (req, res) => {
     try {
-        const { token } = req.query
+        // Decode token in case it was URL encoded
+        const token = decodeURIComponent(req.query.token || '')
+
+        console.log('[Verify] Token received, length:', token.length)
 
         if (!token) {
             return res.status(400).json({ error: 'Token is required' })
         }
 
-        // Get all unused verify_email tokens — no expires_at filter so we can give better errors
         const { data: tokens, error: fetchError } = await supabase
             .from('email_tokens')
             .select('id, user_id, token_hash, expires_at, used')
             .eq('type', 'verify_email')
             .eq('used', false)
 
-        if (fetchError) {
-            console.error('[Verify] DB fetch error:', fetchError.message)
-            return res.status(500).json({ error: 'Internal server error' })
-        }
+        console.log('[Verify] Fetch error:', fetchError)
+        console.log('[Verify] Tokens in DB:', tokens?.length)
 
-        if (!tokens || tokens.length === 0) {
+        if (fetchError || !tokens || tokens.length === 0) {
             return res.status(400).json({ error: 'Invalid or expired verification link' })
         }
 
-        // Find matching token
         let matchedToken = null
         for (const t of tokens) {
             const isMatch = await CryptoUtility.compareToken(token, t.token_hash)
+            console.log('[Verify] Comparing token:', t.id, '| match:', isMatch)
             if (isMatch) { matchedToken = t; break }
         }
+
+        console.log('[Verify] Matched:', matchedToken?.id, '| user:', matchedToken?.user_id)
 
         if (!matchedToken) {
             return res.status(400).json({ error: 'Invalid or expired verification link' })
         }
 
-        // Check expiry manually after finding the match
         if (new Date(matchedToken.expires_at) < new Date()) {
             return res.status(400).json({ error: 'Verification link has expired. Please request a new one.' })
         }
 
-        // Mark token as used
-        const { error: tokenUpdateError } = await supabase
+        // Mark token used
+        const { data: updatedToken, error: tokenUpdateError } = await supabase
             .from('email_tokens')
             .update({ used: true })
             .eq('id', matchedToken.id)
+            .select()
+
+        console.log('[Verify] Token update result:', updatedToken)
+        console.log('[Verify] Token update error:', tokenUpdateError)
 
         if (tokenUpdateError) {
             console.error('[Verify] Failed to mark token used:', tokenUpdateError.message)
             return res.status(500).json({ error: 'Internal server error' })
         }
 
-        // Verify the user
-        const { error: userUpdateError } = await supabase
+        // Verify user
+        const { data: updatedUser, error: userUpdateError } = await supabase
             .from('users')
             .update({ is_verified: true })
             .eq('id', matchedToken.user_id)
+            .select()
+
+        console.log('[Verify] User update result:', updatedUser)
+        console.log('[Verify] User update error:', userUpdateError)
 
         if (userUpdateError) {
             console.error('[Verify] Failed to verify user:', userUpdateError.message)
@@ -404,7 +392,6 @@ router.post('/resend-verification', emailLimiter, async (req, res) => {
             return res.status(400).json({ error: 'Account is already verified' })
         }
 
-        // Delete existing unused verify tokens for this user
         await supabase
             .from('email_tokens')
             .delete()
@@ -412,7 +399,6 @@ router.post('/resend-verification', emailLimiter, async (req, res) => {
             .eq('type', 'verify_email')
             .eq('used', false)
 
-        // Generate and send new token
         const verifyToken = CryptoUtility.generateToken()
         await storeEmailToken(user.id, verifyToken, 'verify_email', VERIFY_TOKEN_EXPIRES_HOURS)
         await sendVerificationEmail(user.email, verifyToken)
@@ -431,7 +417,6 @@ router.post('/forgot-password', emailLimiter, async (req, res) => {
     try {
         const { email } = req.body
 
-        // Always return 200 to prevent email enumeration
         if (!email) {
             return res.status(200).json({ message: 'If that email exists you will receive a reset link' })
         }
@@ -443,7 +428,6 @@ router.post('/forgot-password', emailLimiter, async (req, res) => {
             .single()
 
         if (user) {
-            // Delete existing reset tokens
             await supabase
                 .from('email_tokens')
                 .delete()
@@ -451,7 +435,6 @@ router.post('/forgot-password', emailLimiter, async (req, res) => {
                 .eq('type', 'reset_password')
                 .eq('used', false)
 
-            // Generate and send reset token
             const resetToken = CryptoUtility.generateToken()
             await storeEmailToken(user.id, resetToken, 'reset_password', RESET_TOKEN_EXPIRES_HOURS)
             await sendPasswordResetEmail(user.email, resetToken)
@@ -479,7 +462,6 @@ router.post('/reset-password', async (req, res) => {
             return res.status(400).json({ error: 'Password must be at least 8 characters' })
         }
 
-        // Get all valid reset tokens
         const { data: tokens } = await supabase
             .from('email_tokens')
             .select('id, user_id, token_hash')
@@ -491,7 +473,6 @@ router.post('/reset-password', async (req, res) => {
             return res.status(400).json({ error: 'Invalid or expired reset link' })
         }
 
-        // Find matching token
         let matchedToken = null
         for (const t of tokens) {
             const isMatch = await CryptoUtility.compareToken(token, t.token_hash)
@@ -502,17 +483,12 @@ router.post('/reset-password', async (req, res) => {
             return res.status(400).json({ error: 'Invalid or expired reset link' })
         }
 
-        // Hash new password
         const password_hash = await bcrypt.hash(newPassword, BCRYPT_ROUNDS)
 
-        // Update password and mark token used
         await supabase.from('users').update({ password_hash }).eq('id', matchedToken.user_id)
         await supabase.from('email_tokens').update({ used: true }).eq('id', matchedToken.id)
-
-        // Revoke ALL refresh tokens for this user — force all devices to re-login
         await supabase.from('refresh_tokens').update({ revoked: true }).eq('user_id', matchedToken.user_id)
 
-        // Send confirmation email
         const { data: user } = await supabase
             .from('users')
             .select('email')

@@ -59,7 +59,7 @@ async function sendMail({ to, subject, html, text }) {
 }
 
 export async function sendVerificationEmail(to, token) {
-    const verifyUrl = `${CLIENT_URL}/verify-email?token=${token}`
+    const verifyUrl = `${CLIENT_URL}/verify-email?token=${encodeURIComponent(token)}`
     let html = await getTemplate('verify')
     html = html.replace(/{{VERIFY_URL}}/g, verifyUrl)
     html = html.replace(/{{APP_URL}}/g, CLIENT_URL)
@@ -73,7 +73,7 @@ export async function sendVerificationEmail(to, token) {
 }
 
 export async function sendPasswordResetEmail(to, token) {
-    const resetUrl = `${CLIENT_URL}/reset-password?token=${token}`
+    const resetUrl = `${CLIENT_URL}/reset-password?token=${encodeURIComponent(token)}`
     let html = await getTemplate('reset-password')
     html = html.replace(/{{RESET_URL}}/g, resetUrl)
     html = html.replace(/{{APP_URL}}/g, CLIENT_URL)
