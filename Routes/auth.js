@@ -320,8 +320,8 @@ router.get('/verify-email', async (req, res) => {
             return res.status(400).json({ error: 'Verification link has expired. Please request a new one.' })
         }
 
-        const { data: a, error: b } = await supabase.from('email_tokens').update({ used: true }).eq('id', matchedToken.id)
-        const { data: c, error: d } = await supabase.from('users').update({ is_verified: true }).eq('id', matchedToken.user_id)
+        await supabase.from('email_tokens').update({ used: true }).eq('id', matchedToken.id)
+        await supabase.from('users').update({ is_verified: true }).eq('id', matchedToken.user_id)
 
         return res.status(200).json({ message: 'Email verified successfully' })
 
