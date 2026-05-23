@@ -14,7 +14,7 @@ const VERIFY_TOKEN_EXPIRES_HOURS = 24
 const RESET_TOKEN_EXPIRES_HOURS = 1
 const BCRYPT_ROUNDS = 12
 
-// ─── Helper: set refresh token cookie ────────────────────────────────────────
+// ─── Helpers ─────────────────────────────────────────────────────────────────
 function setRefreshCookie(res, token) {
     res.cookie('refreshToken', token, {
         httpOnly: true,
@@ -24,7 +24,6 @@ function setRefreshCookie(res, token) {
     })
 }
 
-// ─── Helper: clear refresh token cookie ──────────────────────────────────────
 function clearRefreshCookie(res) {
     res.clearCookie('refreshToken', {
         httpOnly: true,
@@ -33,9 +32,8 @@ function clearRefreshCookie(res) {
     })
 }
 
-// ─── Helper: store refresh token in DB ───────────────────────────────────────
-async function storeRefreshToken(userId, plainToken) {
-    const tokenHash = await CryptoUtility.hashToken(plainToken)
+async function storeRefreshToken(userId, rawToken) {
+    const tokenHash = await CryptoUtility.hashToken(rawToken)
     const expiresAt = new Date()
     expiresAt.setDate(expiresAt.getDate() + REFRESH_TOKEN_EXPIRES_DAYS)
 
@@ -49,9 +47,8 @@ async function storeRefreshToken(userId, plainToken) {
     if (error) throw new Error('Failed to store refresh token')
 }
 
-// ─── Helper: store email token in DB ─────────────────────────────────────────
-async function storeEmailToken(userId, plainToken, type, expiresInHours) {
-    const tokenHash = await CryptoUtility.hashToken(plainToken)
+async function storeEmailToken(userId, rawToken, type, expiresInHours) {
+    const tokenHash = await CryptoUtility.hashToken(rawToken)
     const expiresAt = new Date()
     expiresAt.setHours(expiresAt.getHours() + expiresInHours)
 
@@ -86,24 +83,15 @@ router.post('/register', async (req, res) => {
             return res.status(400).json({ error: 'Password must be at least 8 characters' })
         }
 
-        const { data: existingEmail } = await supabase
+        const { data: existingUser } = await supabase
             .from('users')
-            .select('id')
-            .eq('email', email.toLowerCase())
+            .select('id, email, username')
+            .or(`email.eq.${email.toLowerCase()},username.eq.${username}`)
             .single()
 
-        if (existingEmail) {
-            return res.status(409).json({ error: 'Email already in use' })
-        }
-
-        const { data: existingUsername } = await supabase
-            .from('users')
-            .select('id')
-            .eq('username', username)
-            .single()
-
-        if (existingUsername) {
-            return res.status(409).json({ error: 'Username already taken' })
+        if (existingUser) {
+            const field = existingUser.email === email.toLowerCase() ? 'Email' : 'Username'
+            return res.status(409).json({ error: `${field} already in use` })
         }
 
         const password_hash = await bcrypt.hash(password, BCRYPT_ROUNDS)
@@ -121,22 +109,20 @@ router.post('/register', async (req, res) => {
 
         if (insertError) throw insertError
 
-        const verifyToken = CryptoUtility.generateToken()
-        await storeEmailToken(newUser.id, verifyToken, 'verify_email', VERIFY_TOKEN_EXPIRES_HOURS)
-        await sendVerificationEmail(newUser.email, verifyToken)
+        // Generate token and append userId so we can look it up instantly later
+        const rawToken = CryptoUtility.generateToken()
+        const clientToken = `${newUser.id}.${rawToken}`
 
-        const accessToken = JwtUtility.generateAccessToken(newUser)
-        const refreshToken = JwtUtility.generateRefreshToken()
-        await storeRefreshToken(newUser.id, refreshToken)
-        setRefreshCookie(res, refreshToken)
+        await storeEmailToken(newUser.id, rawToken, 'verify_email', VERIFY_TOKEN_EXPIRES_HOURS)
+        await sendVerificationEmail(newUser.email, clientToken)
 
+        // BUG FIX: Removed auto-login. Force user to verify email first.
         return res.status(201).json({
-            accessToken,
+            message: 'Registration successful. Please check your email to verify your account.',
             user: {
                 id: newUser.id,
                 email: newUser.email,
-                username: newUser.username,
-                isVerified: newUser.is_verified
+                username: newUser.username
             }
         })
     } catch (error) {
@@ -162,12 +148,7 @@ router.post('/login', async (req, res) => {
             .eq('email', email.toLowerCase())
             .single()
 
-        if (!user) {
-            return res.status(401).json({ error: 'Invalid credentials' })
-        }
-
-        const passwordMatch = await bcrypt.compare(password, user.password_hash)
-        if (!passwordMatch) {
+        if (!user || !(await bcrypt.compare(password, user.password_hash))) {
             return res.status(401).json({ error: 'Invalid credentials' })
         }
 
@@ -179,9 +160,11 @@ router.post('/login', async (req, res) => {
         }
 
         const accessToken = JwtUtility.generateAccessToken(user)
-        const refreshToken = JwtUtility.generateRefreshToken()
-        await storeRefreshToken(user.id, refreshToken)
-        setRefreshCookie(res, refreshToken)
+        const rawRefresh = JwtUtility.generateRefreshToken()
+        const clientRefresh = `${user.id}.${rawRefresh}`
+
+        await storeRefreshToken(user.id, rawRefresh)
+        setRefreshCookie(res, clientRefresh)
 
         return res.status(200).json({
             accessToken,
@@ -203,15 +186,18 @@ router.post('/login', async (req, res) => {
 // ─────────────────────────────────────────────────────────────────────────────
 router.post('/refresh', async (req, res) => {
     try {
-        const plainToken = req.cookies?.refreshToken
-
-        if (!plainToken) {
-            return res.status(401).json({ error: 'No refresh token provided' })
+        const clientToken = req.cookies?.refreshToken
+        if (!clientToken || !clientToken.includes('.')) {
+            return res.status(401).json({ error: 'Invalid refresh token format' })
         }
 
+        const [userId, rawToken] = clientToken.split('.')
+
+        // BUG FIX: Now we only pull tokens for THIS specific user.
         const { data: tokens } = await supabase
             .from('refresh_tokens')
             .select('id, user_id, token_hash, expires_at, revoked')
+            .eq('user_id', userId)
             .eq('revoked', false)
             .gt('expires_at', new Date().toISOString())
 
@@ -221,13 +207,12 @@ router.post('/refresh', async (req, res) => {
 
         let matchedToken = null
         for (const token of tokens) {
-            const isMatch = await CryptoUtility.compareToken(plainToken, token.token_hash)
-            if (isMatch) { matchedToken = token; break }
+            if (await CryptoUtility.compareToken(rawToken, token.token_hash)) {
+                matchedToken = token; break
+            }
         }
 
-        if (!matchedToken) {
-            return res.status(401).json({ error: 'Invalid refresh token' })
-        }
+        if (!matchedToken) return res.status(401).json({ error: 'Invalid refresh token' })
 
         const { data: user } = await supabase
             .from('users')
@@ -235,14 +220,15 @@ router.post('/refresh', async (req, res) => {
             .eq('id', matchedToken.user_id)
             .single()
 
-        if (!user) {
-            return res.status(401).json({ error: 'User not found' })
-        }
+        if (!user) return res.status(401).json({ error: 'User not found' })
 
         await supabase.from('refresh_tokens').update({ revoked: true }).eq('id', matchedToken.id)
-        const newRefreshToken = JwtUtility.generateRefreshToken()
-        await storeRefreshToken(user.id, newRefreshToken)
-        setRefreshCookie(res, newRefreshToken)
+
+        const newRawRefresh = JwtUtility.generateRefreshToken()
+        const newClientRefresh = `${user.id}.${newRawRefresh}`
+
+        await storeRefreshToken(user.id, newRawRefresh)
+        setRefreshCookie(res, newClientRefresh)
 
         const accessToken = JwtUtility.generateAccessToken(user)
         return res.status(200).json({ accessToken })
@@ -257,18 +243,20 @@ router.post('/refresh', async (req, res) => {
 // ─────────────────────────────────────────────────────────────────────────────
 router.post('/logout', async (req, res) => {
     try {
-        const plainToken = req.cookies?.refreshToken
+        const clientToken = req.cookies?.refreshToken
 
-        if (plainToken) {
+        if (clientToken && clientToken.includes('.')) {
+            const [userId, rawToken] = clientToken.split('.')
+
             const { data: tokens } = await supabase
                 .from('refresh_tokens')
                 .select('id, token_hash')
+                .eq('user_id', userId)
                 .eq('revoked', false)
 
             if (tokens) {
                 for (const token of tokens) {
-                    const isMatch = await CryptoUtility.compareToken(plainToken, token.token_hash)
-                    if (isMatch) {
+                    if (await CryptoUtility.compareToken(rawToken, token.token_hash)) {
                         await supabase.from('refresh_tokens').update({ revoked: true }).eq('id', token.id)
                         break
                     }
@@ -289,56 +277,53 @@ router.post('/logout', async (req, res) => {
 // ─────────────────────────────────────────────────────────────────────────────
 router.get('/verify-email', async (req, res) => {
     try {
-        const { token } = req.query;
+        const clientToken = req.query.token
 
-        if (!token) {
-            return res.status(400).json({ error: 'Token is required' });
+        if (!clientToken || !clientToken.includes('.')) {
+            return res.status(400).json({ error: 'Invalid verification link format' })
         }
 
-        // FIX 1: Remove .eq('used', false) so we can fetch the token even if it was just used
+        const [userId, rawToken] = clientToken.split('.')
+
         const { data: tokens, error: fetchError } = await supabase
             .from('email_tokens')
             .select('id, user_id, token_hash, expires_at, used')
-            .eq('type', 'verify_email');
+            .eq('user_id', userId)
+            .eq('type', 'verify_email')
 
         if (fetchError || !tokens || tokens.length === 0) {
-            return res.status(400).json({ error: 'Invalid verification link' });
+            return res.status(400).json({ error: 'Invalid verification link' })
         }
 
-        let matchedToken = null;
+        let matchedToken = null
         for (const t of tokens) {
-            const isMatch = await CryptoUtility.compareToken(token, t.token_hash);
-            if (isMatch) {
-                matchedToken = t;
-                break;
+            if (await CryptoUtility.compareToken(rawToken, t.token_hash)) {
+                matchedToken = t; break
             }
         }
 
-        if (!matchedToken) {
-            return res.status(400).json({ error: 'Invalid verification link' });
-        }
-
-        // FIX 2: Intercept the React double-fire. If it's already used, it's a success!
-        if (matchedToken.used) {
-            return res.status(200).json({ message: 'Email is already verified' });
-        }
+        if (!matchedToken) return res.status(400).json({ error: 'Invalid verification link' })
 
         if (new Date(matchedToken.expires_at) < new Date()) {
-            return res.status(400).json({ error: 'Verification link has expired. Please request a new one.' });
+            return res.status(400).json({ error: 'Verification link has expired.' })
         }
 
-        res.set('Cache-Control', 'no-store');
+        if (matchedToken.used) {
+            return res.status(200).json({ message: 'Email is already verified' })
+        }
 
-        await supabase.from('email_tokens').update({ used: true }).eq('id', matchedToken.id);
-        await supabase.from('users').update({ is_verified: true }).eq('id', matchedToken.user_id);
+        res.set('Cache-Control', 'no-store')
 
-        return res.status(200).json({ message: 'Email verified successfully' });
+        await supabase.from('email_tokens').update({ used: true }).eq('id', matchedToken.id)
+        await supabase.from('users').update({ is_verified: true }).eq('id', matchedToken.user_id)
+
+        return res.status(200).json({ message: 'Email verified successfully' })
 
     } catch (error) {
-        console.error('[Auth] Verify email error:', error.message);
-        return res.status(500).json({ error: 'Internal server error' });
+        console.error('[Auth] Verify email error:', error.message)
+        return res.status(500).json({ error: 'Internal server error' })
     }
-});
+})
 
 // ─────────────────────────────────────────────────────────────────────────────
 // POST /auth/resend-verification
@@ -357,12 +342,9 @@ router.post('/resend-verification', emailLimiter, async (req, res) => {
             .eq('email', email.toLowerCase())
             .single()
 
-        if (!user) {
-            return res.status(400).json({ error: 'No account found with that email' })
-        }
-
-        if (user.is_verified) {
-            return res.status(400).json({ error: 'Account is already verified' })
+        // BUG FIX: Prevent email enumeration by returning a generic message
+        if (!user || user.is_verified) {
+            return res.status(200).json({ message: 'If an unverified account exists with that email, a verification link has been sent.' })
         }
 
         await supabase
@@ -372,11 +354,13 @@ router.post('/resend-verification', emailLimiter, async (req, res) => {
             .eq('type', 'verify_email')
             .eq('used', false)
 
-        const verifyToken = CryptoUtility.generateToken()
-        await storeEmailToken(user.id, verifyToken, 'verify_email', VERIFY_TOKEN_EXPIRES_HOURS)
-        await sendVerificationEmail(user.email, verifyToken)
+        const rawToken = CryptoUtility.generateToken()
+        const clientToken = `${user.id}.${rawToken}`
 
-        return res.status(200).json({ message: 'Verification email sent' })
+        await storeEmailToken(user.id, rawToken, 'verify_email', VERIFY_TOKEN_EXPIRES_HOURS)
+        await sendVerificationEmail(user.email, clientToken)
+
+        return res.status(200).json({ message: 'If an unverified account exists with that email, a verification link has been sent.' })
     } catch (error) {
         console.error('[Auth] Resend verification error:', error.message)
         return res.status(500).json({ error: 'Internal server error' })
@@ -408,9 +392,11 @@ router.post('/forgot-password', emailLimiter, async (req, res) => {
                 .eq('type', 'reset_password')
                 .eq('used', false)
 
-            const resetToken = CryptoUtility.generateToken()
-            await storeEmailToken(user.id, resetToken, 'reset_password', RESET_TOKEN_EXPIRES_HOURS)
-            await sendPasswordResetEmail(user.email, resetToken)
+            const rawToken = CryptoUtility.generateToken()
+            const clientToken = `${user.id}.${rawToken}`
+
+            await storeEmailToken(user.id, rawToken, 'reset_password', RESET_TOKEN_EXPIRES_HOURS)
+            await sendPasswordResetEmail(user.email, clientToken)
         }
 
         return res.status(200).json({ message: 'If that email exists you will receive a reset link' })
@@ -427,17 +413,20 @@ router.post('/reset-password', async (req, res) => {
     try {
         const { token, newPassword } = req.body
 
-        if (!token || !newPassword) {
-            return res.status(400).json({ error: 'Token and new password are required' })
+        if (!token || !token.includes('.') || !newPassword) {
+            return res.status(400).json({ error: 'Valid token and new password are required' })
         }
 
         if (newPassword.length < 8) {
             return res.status(400).json({ error: 'Password must be at least 8 characters' })
         }
 
+        const [userId, rawToken] = token.split('.')
+
         const { data: tokens } = await supabase
             .from('email_tokens')
             .select('id, user_id, token_hash')
+            .eq('user_id', userId)
             .eq('type', 'reset_password')
             .eq('used', false)
             .gt('expires_at', new Date().toISOString())
@@ -448,13 +437,12 @@ router.post('/reset-password', async (req, res) => {
 
         let matchedToken = null
         for (const t of tokens) {
-            const isMatch = await CryptoUtility.compareToken(token, t.token_hash)
-            if (isMatch) { matchedToken = t; break }
+            if (await CryptoUtility.compareToken(rawToken, t.token_hash)) {
+                matchedToken = t; break
+            }
         }
 
-        if (!matchedToken) {
-            return res.status(400).json({ error: 'Invalid or expired reset link' })
-        }
+        if (!matchedToken) return res.status(400).json({ error: 'Invalid or expired reset link' })
 
         const password_hash = await bcrypt.hash(newPassword, BCRYPT_ROUNDS)
 

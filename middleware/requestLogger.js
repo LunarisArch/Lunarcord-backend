@@ -31,7 +31,7 @@ export const requestLogger = async (req, res, next) => {
             response_body: sanitizeBody(responseBody),
             query_params: Object.keys(req.query).length > 0 ? req.query : null,
         }
-
+        if (logEntry.path === '/health') { return }
         try {
             await supabase.from('request_logs').insert(logEntry)
         } catch (error) {
